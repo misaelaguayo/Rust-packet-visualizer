@@ -1,3 +1,8 @@
+extern crate pnet;
+extern crate pnet_datalink;
+
+use pnet::packet::ethernet::EthernetPacket;
+
 use rand::Rng;
 use sdl2::event::Event;
 use sdl2::image::{self, InitFlag, LoadTexture};
@@ -5,6 +10,10 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::{Point, Rect};
 use sdl2::render::{Texture, WindowCanvas};
+use std::env;
+use std::io::{self, Write};
+use std::process;
+use std::thread;
 use std::time::Duration;
 
 struct State {
@@ -83,6 +92,45 @@ fn render(
     Ok(())
 }
 
+fn handle_ethernet_frame(ethernet: &EthernetPacket) {
+    println!("{} {}", ethernet.get_source(), ethernet.get_destination());
+}
+
+fn packet_handler() {
+    use pnet_datalink::Channel::Ethernet;
+    let iface_name = match env::args().nth(1) {
+        Some(n) => n,
+        None => {
+            writeln!(io::stderr(), "USAGE: packetdump <NETWORK INTERFACE>").unwrap();
+            process::exit(1);
+        }
+    };
+    let interface_names_match = |iface: &pnet_datalink::NetworkInterface| iface.name == iface_name;
+
+    // Find the network interface with the provided name
+    let interfaces = pnet_datalink::interfaces();
+    let interface = interfaces
+        .into_iter()
+        .filter(interface_names_match)
+        .next()
+        .unwrap_or_else(|| panic!("No such network interface: {}", iface_name));
+
+    // Create a channel to receive on
+    let (_, mut rx) = match pnet_datalink::channel(&interface, Default::default()) {
+        Ok(Ethernet(tx, rx)) => (tx, rx),
+        Ok(_) => panic!("packetdump: unhandled channel type"),
+        Err(e) => panic!("packetdump: unable to create channel: {}", e),
+    };
+    loop {
+        match rx.next() {
+            Ok(packet) => {
+                handle_ethernet_frame(&EthernetPacket::new(packet).unwrap());
+            }
+            Err(e) => panic!("packetdump: unable to receive packet: {}", e),
+        };
+    }
+}
+
 fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -98,6 +146,7 @@ fn main() -> Result<(), String> {
         .into_canvas()
         .build()
         .expect("could not make a canvas");
+    canvas.set_scale(0.1, 0.1)?;
     let (width, height) = canvas.output_size()?;
     let mut state = State::new(width as i32, height as i32);
 
@@ -106,6 +155,7 @@ fn main() -> Result<(), String> {
 
     let mut event_pump = sdl_context.event_pump()?;
     let mut i = 0;
+    let _packet_thread = thread::spawn(|| packet_handler());
     'running: loop {
         // Handle events
         for event in event_pump.poll_iter() {
@@ -118,6 +168,7 @@ fn main() -> Result<(), String> {
                 _ => {}
             }
         }
+
         // Update
         i = (i + 1) % 255;
 
@@ -125,8 +176,7 @@ fn main() -> Result<(), String> {
         for packet in &mut state.packets {
             let delta_x = (packet.destination.x - packet.position.x) / 60;
             let delta_y = (packet.destination.y - packet.position.y) / 60;
-            if delta_x != 0 && delta_y != 0
-            {
+            if delta_x != 0 && delta_y != 0 {
                 packet.position.x += (packet.destination.x - packet.position.x) / 60;
                 packet.position.y += (packet.destination.y - packet.position.y) / 60;
             } else {
