@@ -2,6 +2,7 @@ extern crate pnet;
 extern crate pnet_datalink;
 
 use pnet::packet::ethernet::EthernetPacket;
+use std::sync::mpsc;
 
 use rand::Rng;
 use sdl2::event::Event;
@@ -16,34 +17,37 @@ use std::process;
 use std::thread;
 use std::time::Duration;
 
+fn rand_pos(width: i32, height: i32) -> Point {
+    let mut rng = rand::thread_rng();
+    Point::new(rng.gen_range(0..width), rng.gen_range(0..height))
+}
+
 struct State {
     packets: Vec<Packet>,
 }
 
 impl State {
     fn new(width: i32, height: i32) -> State {
-        let mut rng = rand::thread_rng();
-        let mut rand_pos = || Point::new(rng.gen_range(0..width), rng.gen_range(0..height));
-        let packet1_source = rand_pos();
-        let packet2_source = rand_pos();
-        let packet3_source = rand_pos();
+        let packet1_source = rand_pos(width, height);
+        let packet2_source = rand_pos(width, height);
+        let packet3_source = rand_pos(width, height);
         let packet1 = Packet {
             source: packet1_source,
-            destination: rand_pos(),
+            destination: rand_pos(width, height),
             position: packet1_source,
             sprite: Rect::new(-300, -300, 300, 300),
             current_frame: 0,
         };
         let packet2 = Packet {
             source: packet2_source,
-            destination: rand_pos(),
+            destination: rand_pos(width, height),
             position: packet2_source,
             sprite: Rect::new(-300, -300, 300, 300),
             current_frame: 0,
         };
         let packet3 = Packet {
             source: packet3_source,
-            destination: rand_pos(),
+            destination: rand_pos(width, height),
             position: packet3_source,
             sprite: Rect::new(-300, -300, 300, 300),
             current_frame: 0,
@@ -131,6 +135,10 @@ fn packet_handler() {
     }
 }
 
+fn fake_packet_handler() {
+    for _ in 0..10 {}
+}
+
 fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -146,7 +154,7 @@ fn main() -> Result<(), String> {
         .into_canvas()
         .build()
         .expect("could not make a canvas");
-    canvas.set_scale(0.1, 0.1)?;
+    canvas.set_scale(0.4, 0.4)?;
     let (width, height) = canvas.output_size()?;
     let mut state = State::new(width as i32, height as i32);
 
@@ -155,8 +163,44 @@ fn main() -> Result<(), String> {
 
     let mut event_pump = sdl_context.event_pump()?;
     let mut i = 0;
-    let _packet_thread = thread::spawn(|| packet_handler());
+    let (tx, rx) = mpsc::channel();
+    let _packet_thread = thread::spawn(move || {
+        let vals = vec![
+            String::from("hi"),
+            String::from("from"),
+            String::from("the"),
+            String::from("thread"),
+            String::from("hi"),
+            String::from("from"),
+            String::from("the"),
+            String::from("thread"),
+            String::from("hi"),
+            String::from("from"),
+            String::from("the"),
+            String::from("thread"),
+            String::from("hi"),
+            String::from("from"),
+            String::from("the"),
+            String::from("thread"),
+        ];
+
+        for _val in vals {
+            let packet1_source = rand_pos(width as i32, height as i32);
+            let packet1 = Packet {
+                source: packet1_source,
+                destination: rand_pos(width as i32, height as i32),
+                position: packet1_source,
+                sprite: Rect::new(-300, -300, 300, 300),
+                current_frame: 0,
+            };
+            tx.send(packet1).unwrap();
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
     'running: loop {
+        if let Ok(packet) = rx.try_recv() {
+            state.packets.push(packet);
+        }
         // Handle events
         for event in event_pump.poll_iter() {
             match event {
