@@ -11,9 +11,6 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::{Point, Rect};
 use sdl2::render::{Texture, WindowCanvas};
-use std::env;
-use std::io::{self, Write};
-use std::process;
 use std::thread;
 use std::time::Duration;
 
@@ -100,16 +97,9 @@ fn handle_ethernet_frame(ethernet: &EthernetPacket) {
     println!("{} {}", ethernet.get_source(), ethernet.get_destination());
 }
 
-fn packet_handler() {
+fn packet_handler(tx: mpsc::Sender<Packet>, width:i32, height:i32) {
     use pnet_datalink::Channel::Ethernet;
-    let iface_name = match env::args().nth(1) {
-        Some(n) => n,
-        None => {
-            writeln!(io::stderr(), "USAGE: packetdump <NETWORK INTERFACE>").unwrap();
-            process::exit(1);
-        }
-    };
-    let interface_names_match = |iface: &pnet_datalink::NetworkInterface| iface.name == iface_name;
+    let interface_names_match = |iface: &pnet_datalink::NetworkInterface| iface.name == "en0";
 
     // Find the network interface with the provided name
     let interfaces = pnet_datalink::interfaces();
@@ -117,7 +107,7 @@ fn packet_handler() {
         .into_iter()
         .filter(interface_names_match)
         .next()
-        .unwrap_or_else(|| panic!("No such network interface: {}", iface_name));
+        .unwrap_or_else(|| panic!("No such network interface: en0"));
 
     // Create a channel to receive on
     let (_, mut rx) = match pnet_datalink::channel(&interface, Default::default()) {
@@ -128,15 +118,20 @@ fn packet_handler() {
     loop {
         match rx.next() {
             Ok(packet) => {
+                let packet1_source = rand_pos(width as i32, height as i32);
+                let packet1 = Packet {
+                    source: packet1_source,
+                    destination: rand_pos(width as i32, height as i32),
+                    position: packet1_source,
+                    sprite: Rect::new(-300, -300, 300, 300),
+                    current_frame: 0,
+                };
+                tx.send(packet1).unwrap();
                 handle_ethernet_frame(&EthernetPacket::new(packet).unwrap());
             }
             Err(e) => panic!("packetdump: unable to receive packet: {}", e),
         };
     }
-}
-
-fn fake_packet_handler() {
-    for _ in 0..10 {}
 }
 
 fn main() -> Result<(), String> {
@@ -154,7 +149,7 @@ fn main() -> Result<(), String> {
         .into_canvas()
         .build()
         .expect("could not make a canvas");
-    canvas.set_scale(0.4, 0.4)?;
+    canvas.set_scale(0.6, 0.6)?;
     let (width, height) = canvas.output_size()?;
     let mut state = State::new(width as i32, height as i32);
 
@@ -164,39 +159,7 @@ fn main() -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
     let mut i = 0;
     let (tx, rx) = mpsc::channel();
-    let _packet_thread = thread::spawn(move || {
-        let vals = vec![
-            String::from("hi"),
-            String::from("from"),
-            String::from("the"),
-            String::from("thread"),
-            String::from("hi"),
-            String::from("from"),
-            String::from("the"),
-            String::from("thread"),
-            String::from("hi"),
-            String::from("from"),
-            String::from("the"),
-            String::from("thread"),
-            String::from("hi"),
-            String::from("from"),
-            String::from("the"),
-            String::from("thread"),
-        ];
-
-        for _val in vals {
-            let packet1_source = rand_pos(width as i32, height as i32);
-            let packet1 = Packet {
-                source: packet1_source,
-                destination: rand_pos(width as i32, height as i32),
-                position: packet1_source,
-                sprite: Rect::new(-300, -300, 300, 300),
-                current_frame: 0,
-            };
-            tx.send(packet1).unwrap();
-            thread::sleep(Duration::from_secs(1));
-        }
-    });
+    let _packet_thread = thread::spawn(move || packet_handler(tx, width as i32, height as i32));
     'running: loop {
         if let Ok(packet) = rx.try_recv() {
             state.packets.push(packet);
