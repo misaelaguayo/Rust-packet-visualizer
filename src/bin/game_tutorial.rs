@@ -14,6 +14,7 @@ use sdl2::render::{Texture, WindowCanvas};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
+use sdl2::gfx::primitives::DrawRenderer;
 
 fn rand_pos(width: i32, height: i32) -> Point {
     let mut rng = rand::thread_rng();
@@ -39,32 +40,18 @@ struct Packet {
     source: Point,
     destination: Point,
     position: Point,
-    sprite: Rect,
-    current_frame: i32,
 }
 
 fn render(
     canvas: &mut WindowCanvas,
     color: Color,
-    texture: &Texture,
     state: &State,
 ) -> Result<(), String> {
     canvas.set_draw_color(color);
     canvas.clear();
 
-    let (width, height) = canvas.output_size()?;
     for packet in &state.packets {
-        let (frame_width, frame_height) = packet.sprite.size();
-        let current_frame = Rect::new(
-            packet.sprite.x() + frame_width as i32 * packet.current_frame,
-            packet.sprite.y() + frame_height as i32 * 1,
-            frame_width,
-            frame_height,
-        );
-        let screen_position = packet.position + Point::new(width as i32 / 2, height as i32 / 2);
-        // Treat the center of the screen as the (0,0) coordinate
-        let screen_rect = Rect::from_center(screen_position, frame_width, frame_height);
-        canvas.copy(texture, current_frame, screen_rect)?;
+        canvas.circle(packet.position.x as i16, packet.position.y as i16, 16, Color::RGB(255, 255, 255)).unwrap();
     }
 
     canvas.present();
@@ -119,12 +106,8 @@ fn main() -> Result<(), String> {
         .into_canvas()
         .build()
         .expect("could not make a canvas");
-    canvas.set_scale(0.6, 0.6)?;
     let (width, height) = canvas.output_size()?;
     let mut state = State::new();
-
-    let texture_creator = canvas.texture_creator();
-    let texture = texture_creator.load_texture("assets/components/Target2_spritesheet.png")?;
 
     let mut event_pump = sdl_context.event_pump()?;
     let mut i = 0;
@@ -147,8 +130,6 @@ fn main() -> Result<(), String> {
                 source: *state.map.get(&source).unwrap(),
                 destination: *state.map.get(&destination).unwrap(),
                 position: *state.map.get(&source).unwrap(),
-                sprite: Rect::new(-300, -300, 300, 300),
-                current_frame: 0,
             };
             state.packets.push(packet1);
         }
@@ -180,13 +161,10 @@ fn main() -> Result<(), String> {
                 packet.position.x += (packet.destination.x - packet.position.x) / 60;
                 packet.position.y += (packet.destination.y - packet.position.y) / 60;
             }
-            if i % 10 == 0 {
-                packet.current_frame = (packet.current_frame + 1) % 4;
-            }
         }
 
         // Render
-        render(&mut canvas, Color::RGB(i, 64, 255 - i), &texture, &state)?;
+        render(&mut canvas, Color::RGB(i, 64, 255 - i), &state)?;
 
         // Time management!
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
