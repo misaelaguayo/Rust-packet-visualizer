@@ -11,6 +11,7 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::{Point, Rect};
 use sdl2::render::{Texture, WindowCanvas};
+use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
@@ -21,36 +22,14 @@ fn rand_pos(width: i32, height: i32) -> Point {
 
 struct State {
     packets: Vec<Packet>,
+    map: HashMap<String, Point>,
 }
 
 impl State {
-    fn new(width: i32, height: i32) -> State {
-        let packet1_source = rand_pos(width, height);
-        let packet2_source = rand_pos(width, height);
-        let packet3_source = rand_pos(width, height);
-        let packet1 = Packet {
-            source: packet1_source,
-            destination: rand_pos(width, height),
-            position: packet1_source,
-            sprite: Rect::new(-300, -300, 300, 300),
-            current_frame: 0,
-        };
-        let packet2 = Packet {
-            source: packet2_source,
-            destination: rand_pos(width, height),
-            position: packet2_source,
-            sprite: Rect::new(-300, -300, 300, 300),
-            current_frame: 0,
-        };
-        let packet3 = Packet {
-            source: packet3_source,
-            destination: rand_pos(width, height),
-            position: packet3_source,
-            sprite: Rect::new(-300, -300, 300, 300),
-            current_frame: 0,
-        };
+    fn new() -> State {
         State {
-            packets: vec![packet1, packet2, packet3],
+            packets: Vec::new(),
+            map: HashMap::new(),
         }
     }
 }
@@ -93,11 +72,7 @@ fn render(
     Ok(())
 }
 
-fn handle_ethernet_frame(ethernet: &EthernetPacket) {
-    println!("{} {}", ethernet.get_source(), ethernet.get_destination());
-}
-
-fn packet_handler(tx: mpsc::Sender<Packet>, width:i32, height:i32) {
+fn packet_handler(tx: mpsc::Sender<(String, String)>) {
     use pnet_datalink::Channel::Ethernet;
     let interface_names_match = |iface: &pnet_datalink::NetworkInterface| iface.name == "en0";
 
@@ -118,16 +93,11 @@ fn packet_handler(tx: mpsc::Sender<Packet>, width:i32, height:i32) {
     loop {
         match rx.next() {
             Ok(packet) => {
-                let packet1_source = rand_pos(width as i32, height as i32);
-                let packet1 = Packet {
-                    source: packet1_source,
-                    destination: rand_pos(width as i32, height as i32),
-                    position: packet1_source,
-                    sprite: Rect::new(-300, -300, 300, 300),
-                    current_frame: 0,
-                };
-                tx.send(packet1).unwrap();
-                handle_ethernet_frame(&EthernetPacket::new(packet).unwrap());
+                let ethernet_packet = &EthernetPacket::new(packet).unwrap();
+                let source = ethernet_packet.get_source().to_string();
+                let destination = ethernet_packet.get_destination().to_string();
+                println!("source: {} destination {}", source, destination);
+                tx.send((source, destination)).unwrap();
             }
             Err(e) => panic!("packetdump: unable to receive packet: {}", e),
         };
@@ -151,7 +121,7 @@ fn main() -> Result<(), String> {
         .expect("could not make a canvas");
     canvas.set_scale(0.6, 0.6)?;
     let (width, height) = canvas.output_size()?;
-    let mut state = State::new(width as i32, height as i32);
+    let mut state = State::new();
 
     let texture_creator = canvas.texture_creator();
     let texture = texture_creator.load_texture("assets/components/Target2_spritesheet.png")?;
@@ -159,10 +129,28 @@ fn main() -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
     let mut i = 0;
     let (tx, rx) = mpsc::channel();
-    let _packet_thread = thread::spawn(move || packet_handler(tx, width as i32, height as i32));
+    let _packet_thread = thread::spawn(move || packet_handler(tx));
     'running: loop {
         if let Ok(packet) = rx.try_recv() {
-            state.packets.push(packet);
+            let (source, destination) = packet;
+            if !state.map.contains_key(&source) {
+                state
+                    .map
+                    .insert(source.clone(), rand_pos(width as i32, height as i32));
+            }
+            if !state.map.contains_key(&destination) {
+                state
+                    .map
+                    .insert(destination.clone(), rand_pos(width as i32, height as i32));
+            }
+            let packet1 = Packet {
+                source: *state.map.get(&source).unwrap(),
+                destination: *state.map.get(&destination).unwrap(),
+                position: *state.map.get(&source).unwrap(),
+                sprite: Rect::new(-300, -300, 300, 300),
+                current_frame: 0,
+            };
+            state.packets.push(packet1);
         }
         // Handle events
         for event in event_pump.poll_iter() {
@@ -179,6 +167,11 @@ fn main() -> Result<(), String> {
         // Update
         i = (i + 1) % 255;
 
+        // delete packets which have reached their destination
+        state
+            .packets
+            .retain(|packet| packet.destination != packet.position);
+
         // render packets in transit from source to destination
         for packet in &mut state.packets {
             let delta_x = (packet.destination.x - packet.position.x) / 60;
@@ -186,8 +179,6 @@ fn main() -> Result<(), String> {
             if delta_x != 0 && delta_y != 0 {
                 packet.position.x += (packet.destination.x - packet.position.x) / 60;
                 packet.position.y += (packet.destination.y - packet.position.y) / 60;
-            } else {
-                packet.position = packet.source;
             }
             if i % 10 == 0 {
                 packet.current_frame = (packet.current_frame + 1) % 4;
