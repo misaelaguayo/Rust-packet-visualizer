@@ -6,15 +6,15 @@ use std::sync::mpsc;
 
 use rand::Rng;
 use sdl2::event::Event;
-use sdl2::image::{self, InitFlag, LoadTexture};
+use sdl2::gfx::primitives::DrawRenderer;
+use sdl2::image::{self, InitFlag};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use sdl2::rect::{Point, Rect};
-use sdl2::render::{Texture, WindowCanvas};
+use sdl2::rect::Point;
+use sdl2::render::WindowCanvas;
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
-use sdl2::gfx::primitives::DrawRenderer;
 
 fn rand_pos(width: i32, height: i32) -> Point {
     let mut rng = rand::thread_rng();
@@ -42,16 +42,19 @@ struct Packet {
     position: Point,
 }
 
-fn render(
-    canvas: &mut WindowCanvas,
-    color: Color,
-    state: &State,
-) -> Result<(), String> {
+fn render(canvas: &mut WindowCanvas, color: Color, state: &State) -> Result<(), String> {
     canvas.set_draw_color(color);
     canvas.clear();
 
     for packet in &state.packets {
-        canvas.circle(packet.position.x as i16, packet.position.y as i16, 16, Color::RGB(255, 255, 255)).unwrap();
+        canvas
+            .circle(
+                packet.position.x as i16,
+                packet.position.y as i16,
+                16,
+                Color::RGB(255, 255, 255),
+            )
+            .unwrap();
     }
 
     canvas.present();
