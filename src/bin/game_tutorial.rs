@@ -1,9 +1,13 @@
 extern crate pnet;
 extern crate pnet_datalink;
 
-use pnet::packet::ethernet::EthernetPacket;
 use std::sync::mpsc;
 
+use pnet::packet::arp::ArpPacket;
+use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
+use pnet::packet::Packet;
 use rand::Rng;
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
@@ -13,8 +17,56 @@ use sdl2::pixels::Color;
 use sdl2::rect::Point;
 use sdl2::render::WindowCanvas;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::thread;
 use std::time::Duration;
+
+fn handle_arp_packet(tx: &mpsc::Sender<(String, String)>, ethernet: &EthernetPacket) {
+    let header = ArpPacket::new(ethernet.payload());
+    if let Some(header) = header {
+        tx.send((
+            header.get_sender_proto_addr().to_string(),
+            header.get_target_proto_addr().to_string(),
+        ))
+        .unwrap();
+    }
+}
+
+fn handle_ipv6_packet(tx: &mpsc::Sender<(String, String)>, ethernet: &EthernetPacket) {
+    let header = Ipv6Packet::new(ethernet.payload());
+    if let Some(header) = header {
+        tx.send((
+            IpAddr::V6(header.get_source()).to_string(),
+            IpAddr::V6(header.get_destination()).to_string(),
+        ))
+        .unwrap();
+    }
+}
+
+fn handle_ipv4_packet(tx: &mpsc::Sender<(String, String)>, ethernet: &EthernetPacket) {
+    let header = Ipv4Packet::new(ethernet.payload());
+    if let Some(header) = header {
+        tx.send((
+            IpAddr::V4(header.get_source()).to_string(),
+            IpAddr::V4(header.get_destination()).to_string(),
+        ))
+        .unwrap();
+    }
+}
+
+fn handle_ethernet_frame(tx: &mpsc::Sender<(String, String)>, ethernet: &EthernetPacket) {
+    match ethernet.get_ethertype() {
+        EtherTypes::Ipv4 => handle_ipv4_packet(&tx, ethernet),
+        EtherTypes::Ipv6 => handle_ipv6_packet(&tx, ethernet),
+        EtherTypes::Arp => handle_arp_packet(&tx, ethernet),
+        _ => println!(
+            "Unknown packet: {} > {}; ethertype: {:?}",
+            ethernet.get_source(),
+            ethernet.get_destination(),
+            ethernet.get_ethertype(),
+        ),
+    }
+}
 
 fn rand_pos(width: i32, height: i32) -> Point {
     let mut rng = rand::thread_rng();
@@ -22,7 +74,7 @@ fn rand_pos(width: i32, height: i32) -> Point {
 }
 
 struct State {
-    packets: Vec<Packet>,
+    packets: Vec<PacketStruct>,
     map: HashMap<String, Point>,
 }
 
@@ -36,7 +88,7 @@ impl State {
 }
 
 #[derive(Debug)]
-struct Packet {
+struct PacketStruct {
     source: Point,
     destination: Point,
     position: Point,
@@ -49,9 +101,34 @@ fn render(canvas: &mut WindowCanvas, color: Color, state: &State) -> Result<(), 
     for packet in &state.packets {
         canvas
             .circle(
+                packet.source.x as i16,
+                packet.source.y as i16,
+                16,
+                Color::RGB(255, 255, 255),
+            )
+            .unwrap();
+        canvas
+            .circle(
+                packet.destination.x as i16,
+                packet.destination.y as i16,
+                16,
+                Color::RGB(255, 255, 255),
+            )
+            .unwrap();
+        canvas
+            .circle(
                 packet.position.x as i16,
                 packet.position.y as i16,
                 16,
+                Color::RGB(255, 255, 255),
+            )
+            .unwrap();
+        canvas
+            .line(
+                packet.position.x as i16,
+                packet.position.y as i16,
+                packet.destination.x as i16,
+                packet.destination.y as i16,
                 Color::RGB(255, 255, 255),
             )
             .unwrap();
@@ -84,10 +161,8 @@ fn packet_handler(tx: mpsc::Sender<(String, String)>) {
         match rx.next() {
             Ok(packet) => {
                 let ethernet_packet = &EthernetPacket::new(packet).unwrap();
-                let source = ethernet_packet.get_source().to_string();
-                let destination = ethernet_packet.get_destination().to_string();
-                println!("source: {} destination {}", source, destination);
-                tx.send((source, destination)).unwrap();
+                // tx.send((source, destination)).unwrap();
+                handle_ethernet_frame(&tx, &ethernet_packet);
             }
             Err(e) => panic!("packetdump: unable to receive packet: {}", e),
         };
@@ -119,6 +194,7 @@ fn main() -> Result<(), String> {
     'running: loop {
         if let Ok(packet) = rx.try_recv() {
             let (source, destination) = packet;
+            println!("Source: {} destination: {}", source, destination);
             if !state.map.contains_key(&source) {
                 state
                     .map
@@ -129,7 +205,7 @@ fn main() -> Result<(), String> {
                     .map
                     .insert(destination.clone(), rand_pos(width as i32, height as i32));
             }
-            let packet1 = Packet {
+            let packet1 = PacketStruct {
                 source: *state.map.get(&source).unwrap(),
                 destination: *state.map.get(&destination).unwrap(),
                 position: *state.map.get(&source).unwrap(),
@@ -158,11 +234,14 @@ fn main() -> Result<(), String> {
 
         // render packets in transit from source to destination
         for packet in &mut state.packets {
-            let delta_x = (packet.destination.x - packet.position.x) / 60;
-            let delta_y = (packet.destination.y - packet.position.y) / 60;
+            let delta_x = (packet.destination.x - packet.position.x) / 10;
+            let delta_y = (packet.destination.y - packet.position.y) / 10;
             if delta_x != 0 && delta_y != 0 {
-                packet.position.x += (packet.destination.x - packet.position.x) / 60;
-                packet.position.y += (packet.destination.y - packet.position.y) / 60;
+                packet.position.x += (packet.destination.x - packet.position.x) / 10;
+                packet.position.y += (packet.destination.y - packet.position.y) / 10;
+            }
+            else{
+                packet.position = packet.destination;
             }
         }
 
