@@ -175,7 +175,7 @@ fn main() -> Result<(), String> {
     // prevent rust from dropping this value by creating unused variable
     let _image_context = image::init(InitFlag::PNG | InitFlag::JPG)?;
     let window = video_subsystem
-        .window("game tutorial", 800, 600)
+        .window("Rust packet visualizer", 800, 600)
         .position_centered()
         .build()
         .expect("could not initialize video subsystem");
