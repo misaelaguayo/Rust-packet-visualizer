@@ -1,5 +1,5 @@
 # Rust packet visualizer
-An alternative way to visualize how packets on an interface form a graph
+An alternative way to visualize how packets on an interface form a graph. Defaults to listening on interface "en0"
 
 ![packetvisualizer](https://user-images.githubusercontent.com/29875928/189706365-64882191-53b9-469e-a7d3-7709c2f60df0.gif)
 
@@ -22,3 +22,4 @@ Once you have the requirements, use ```Cargo run``` to run the project.
 - network hotspots
 - Clicking on a node for more information
 - Assets for drawing circles
+- Easier way to specify which interface to listen on
