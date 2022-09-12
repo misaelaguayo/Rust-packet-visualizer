@@ -5,6 +5,7 @@ An alternative way to visualize how packets on an interface form a graph. Defaul
 
 ## Requirements
 ### Mac
+- Cargo
 - homebrew
 - sdl2
     -  ```brew search sdl2```
