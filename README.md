@@ -12,6 +12,11 @@ An alternative way to visualize how packets on an interface form a graph. Defaul
     -  ```brew install sdl2 sdl2_image sdl2_mixer sdl2_net sdl2_ttf...```
     - You may need to ensure these are on your path so cargo run can find them
         - https://github.com/PistonDevelopers/rust-empty/issues/175
+### Ubuntu
+- Cargo
+- apt package manager
+- sdl2
+    - ```sudo apt install libsdl2-ttf-dev libsdl2-image-dev libsdl2-mixer-dev```
 ### Other OS
 - idk
 
